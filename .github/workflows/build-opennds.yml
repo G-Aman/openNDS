@@ -37,7 +37,7 @@ jobs:
           docker run --rm --platform linux/arm64 \
             -v "$PWD/src:/src" -w /src \
             alpine:3.20 \
-            sh -lc 'set -e; apk add --no-cache build-base libmicrohttpd-dev; make CC=gcc LDLIBS=-lmicrohttpd opennds; strip opennds'
+            sh -lc 'set -e; apk add --no-cache build-base linux-headers libmicrohttpd-dev; make CC=gcc LDLIBS=-lmicrohttpd opennds; strip opennds'
 
       - name: Show what was built
         run: |
@@ -45,7 +45,6 @@ jobs:
           readelf -h src/opennds | grep -E "Class|Machine"
           readelf -d src/opennds | grep -E "NEEDED|SONAME" || true
           strings src/opennds | grep -m1 "This is openNDS version" || true
-          strings src/opennds | grep -m1 "ndsctl thread" || true
 
       - name: Upload binary
         uses: actions/upload-artifact@v4
