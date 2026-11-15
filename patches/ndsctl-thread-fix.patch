@@ -1,0 +1,100 @@
+--- a/src/ndsctl_thread.c
++++ b/src/ndsctl_thread.c
+@@ -85,6 +85,8 @@
+ 	struct epoll_event *events;
+ 	int current_fd_count;
+ 	int number_of_count;
++	int maxevents;
++	int dead;
+ 	int i;
+ 
+ 	debug(LOG_DEBUG, "Starting ndsctl thread");
+@@ -145,7 +147,17 @@
+ 		memset(&sa_un, 0, sizeof(sa_un));
+ 		len = (socklen_t) sizeof(sa_un);
+ 
+-		number_of_count = epoll_wait(epoll_fd, events, current_fd_count, -1);
++		// events has MAX_EVENT_SIZE slots, but current_fd_count grows with
++		// every accepted client, so it must not be passed through unclamped.
++		maxevents = current_fd_count;
++		if (maxevents > MAX_EVENT_SIZE) {
++			maxevents = MAX_EVENT_SIZE;
++		}
++		if (maxevents < 1) {
++			maxevents = 1;
++		}
++
++		number_of_count = epoll_wait(epoll_fd, events, maxevents, -1);
+ 
+ 		if (number_of_count == -1) {
+ 			// interupted is not an error
+@@ -163,10 +175,17 @@
+ 					(!(events[i].events & EPOLLIN))) {
+ 				debug(LOG_ERR, "Socket is not ready for communication : %s", strerror(errno));
+ 
+-				if (events[i].data.fd > 0) {
+-					shutdown(events[i].data.fd, 2);
+-					close(events[i].data.fd);
++				dead = events[i].data.fd;
++
++				if (dead > 0) {
++					shutdown(dead, 2);
++					close(dead);
+ 					events[i].data.fd = 0;
++				}
++
++				// A client that never sent a command must not keep its slot.
++				if (dead > 0 && dead != sock && current_fd_count > 1) {
++					current_fd_count -= 1;
+ 				}
+ 				continue;
+ 			}
+@@ -214,8 +233,8 @@
+ {
+ 	int done, i, ret = 0;
+ 	char request[MAX_BUF];
+-	//ssize_t read_bytes, len;
+-	int read_bytes, len;
++	int read_bytes;
++	ssize_t len;
+ 	FILE* fp;
+ 
+ 	debug(LOG_DEBUG, "Entering thread_ndsctl_handler....");
+@@ -229,11 +248,25 @@
+ 	debug(LOG_DEBUG, "Read bytes and stuff from socket descriptor [%d], pointer [%lu]", fd, fp);
+ 
+ 	// Read....
+-	while (!done && read_bytes < (sizeof(request) - 1)) {
+-		len = read(fd, request + read_bytes, sizeof(request) - read_bytes);
++	while (!done && read_bytes < (int)sizeof(request) - 1) {
++		len = read(fd, request + read_bytes, sizeof(request) - (size_t)read_bytes - 1);
++
++		// The accepted socket is non-blocking. read() returns -1 on EAGAIN and 0
++		// on EOF; neither is a byte count. A 0 return used to spin this thread
++		// forever, stalling every later ndsctl command.
++		if (len < 0) {
++			if (errno == EINTR) {
++				continue;
++			}
++			break;
++		}
++
++		if (len == 0) {
++			break;
++		}
+ 
+ 		// Have we gotten a command yet?
+-		for (i = read_bytes; i < (read_bytes + len); i++) {
++		for (i = read_bytes; i < read_bytes + (int)len; i++) {
+ 			if (request[i] == '\r' || request[i] == '\n') {
+ 				request[i] = '\0';
+ 				done = 1;
+@@ -241,7 +274,7 @@
+ 		}
+ 
+ 		// Increment position
+-		read_bytes += len;
++		read_bytes += (int)len;
+ 	}
+ 
+ 	debug(LOG_DEBUG, "ndsctl request received: [%s]", request);
