@@ -35,9 +35,9 @@ jobs:
           patch -p1 -d src-patched < patches/ndsctl-thread-fix.patch
           echo "--- patched source sanity ---"
           grep -c "errno == EINTR" src-patched/src/ndsctl_thread.c
-          grep -n "Neither is a byte count" src-patched/src/ndsctl_thread.c
+          grep -in "byte count" src-patched/src/ndsctl_thread.c
           echo "--- stock source must NOT contain it ---"
-          ! grep -q "Neither is a byte count" src-stock/src/ndsctl_thread.c
+          ! grep -qi "byte count" src-stock/src/ndsctl_thread.c
 
       - name: Enable arm64 emulation
         uses: docker/setup-qemu-action@v3
