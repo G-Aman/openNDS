@@ -1,0 +1,55 @@
+name: Build openNDS 10.3.1 (aarch64 musl)
+
+# Stock v10.3.1 + the ndsctl control-thread fix, built against musl 1.2.5
+# (same libc the router runs). Artifact -> /usr/bin/opennds.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ndsctl-fix]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Workflow repo (for the patch)
+        uses: actions/checkout@v4
+
+      - name: Pristine openNDS v10.3.1
+        uses: actions/checkout@v4
+        with:
+          repository: openNDS/openNDS
+          ref: v10.3.1
+          path: src
+
+      - name: Apply the ndsctl control-thread fix
+        run: |
+          patch -p1 -d src < patches/ndsctl-thread-fix.patch
+          echo "--- changed files ---"
+          git -C src status --short
+          grep -c "errno == EINTR" src/src/ndsctl_thread.c
+
+      - name: Enable arm64 emulation
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build in Alpine 3.20 (musl 1.2.5)
+        run: |
+          docker run --rm --platform linux/arm64 \
+            -v "$PWD/src:/src" -w /src \
+            alpine:3.20 \
+            sh -lc 'set -e; apk add --no-cache build-base libmicrohttpd-dev; make CC=gcc LDLIBS=-lmicrohttpd opennds; strip opennds'
+
+      - name: Show what was built
+        run: |
+          ls -l src/opennds
+          readelf -h src/opennds | grep -E "Class|Machine"
+          readelf -d src/opennds | grep -E "NEEDED|SONAME" || true
+          strings src/opennds | grep -m1 "This is openNDS version" || true
+          strings src/opennds | grep -m1 "ndsctl thread" || true
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: opennds-10.3.1-aarch64-musl
+          path: src/opennds
+          if-no-files-found: error
