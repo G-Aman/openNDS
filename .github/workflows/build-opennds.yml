@@ -1,7 +1,8 @@
-name: Build openNDS 10.3.1 (aarch64 musl)
+name: Build openNDS 10.3.1 + ndsctl fix, with A/B proof
 
-# Stock v10.3.1 + the ndsctl control-thread fix, built against musl 1.2.5
-# (same libc the router runs). Artifact -> /usr/bin/opennds.
+# Builds pristine v10.3.1 AND v10.3.1 + the two ndsctl hunks in the same
+# container, then diffs the two binaries to prove the fix is really in the
+# artifact. Artifact = patched binary (+ the A/B evidence).
 
 on:
   workflow_dispatch:
@@ -12,43 +13,81 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Workflow repo (for the patch)
+      - name: Workflow repo (patch + workflow)
         uses: actions/checkout@v4
 
-      - name: Pristine openNDS v10.3.1
+      - name: Pristine openNDS v10.3.1 (stock copy)
         uses: actions/checkout@v4
         with:
           repository: openNDS/openNDS
           ref: v10.3.1
-          path: src
+          path: src-stock
+
+      - name: Pristine openNDS v10.3.1 (patched copy)
+        uses: actions/checkout@v4
+        with:
+          repository: openNDS/openNDS
+          ref: v10.3.1
+          path: src-patched
 
       - name: Apply the ndsctl control-thread fix
         run: |
-          patch -p1 -d src < patches/ndsctl-thread-fix.patch
-          echo "--- changed files ---"
-          git -C src status --short
-          grep -c "errno == EINTR" src/src/ndsctl_thread.c
+          patch -p1 -d src-patched < patches/ndsctl-thread-fix.patch
+          echo "--- patched source sanity ---"
+          grep -c "errno == EINTR" src-patched/src/ndsctl_thread.c
+          grep -n "Neither is a byte count" src-patched/src/ndsctl_thread.c
+          echo "--- stock source must NOT contain it ---"
+          ! grep -q "Neither is a byte count" src-stock/src/ndsctl_thread.c
 
       - name: Enable arm64 emulation
         uses: docker/setup-qemu-action@v3
 
-      - name: Build in Alpine 3.20 (musl 1.2.5)
+      - name: Build both, diff the machine code
         run: |
           docker run --rm --platform linux/arm64 \
-            -v "$PWD/src:/src" -w /src \
+            -v "$PWD:/w" -w /w \
             alpine:3.20 \
-            sh -lc 'set -e; apk add --no-cache build-base linux-headers libmicrohttpd-dev; make CC=gcc LDLIBS=-lmicrohttpd opennds; strip opennds'
+            sh -lc '
+              set -e
+              apk add --no-cache build-base linux-headers libmicrohttpd-dev >/dev/null
+              for d in src-stock src-patched; do
+                ( cd $d && make CC=gcc LDLIBS=-lmicrohttpd opennds >/dev/null 2>&1 ) \
+                  || { echo "BUILD FAILED: $d"; cd $d && make CC=gcc LDLIBS=-lmicrohttpd opennds; exit 1; }
+                objdump -d $d/opennds > $d.full.asm
+              done
+              echo "=== binary sizes ==="
+              ls -l src-stock/opennds src-patched/opennds
+              echo "=== sha256 ==="
+              sha256sum src-stock/opennds src-patched/opennds
+              echo "=== symbol table check ==="
+              nm src-stock/opennds    | grep -w ndsctl_handler || true
+              nm src-patched/opennds  | grep -w ndsctl_handler || true
+              echo "=== __errno_location call sites (patched must be higher) ==="
+              s=$(grep -c "call.*__errno_location" src-stock.full.asm || true)
+              p=$(grep -c "call.*__errno_location" src-patched.full.asm || true)
+              echo "stock=$s patched=$p"
+              [ "$p" -gt "$s" ] || { echo "PROOF FAILED: no extra errno check"; exit 1; }
+              echo "=== instruction diff (should be confined to ndsctl code) ==="
+              diff -u src-stock.full.asm src-patched.full.asm > ab.diff || true
+              echo "diff lines: $(wc -l < ab.diff)"
+              head -60 ab.diff
+              echo "=== diff touches ndsctl_handler? ==="
+              grep -c "ndsctl_handler" ab.diff
+              strip src-patched/opennds
+            '
 
       - name: Show what was built
         run: |
-          ls -l src/opennds
-          readelf -h src/opennds | grep -E "Class|Machine"
-          readelf -d src/opennds | grep -E "NEEDED|SONAME" || true
-          strings src/opennds | grep -m1 "This is openNDS version" || true
+          ls -l src-patched/opennds
+          readelf -h src-patched/opennds | grep -E "Class|Machine|Type"
+          readelf -d src-patched/opennds | grep -E "NEEDED" || true
+          strings src-patched/opennds | grep -m1 "This is openNDS version" || true
 
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
           name: opennds-10.3.1-aarch64-musl
-          path: src/opennds
+          path: |
+            src-patched/opennds
+            ab.diff
           if-no-files-found: error
