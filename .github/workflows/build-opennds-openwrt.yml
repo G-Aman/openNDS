@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       opennds_ref:
-        description: "Branch or tag in THIS repo to build (e.g. master, 11.0.00)"
+        description: "Branch or tag in THIS repo to build (e.g. 11.0.00, master)"
         required: true
-        default: "master"
+        default: "11.0.00"
         type: string
       sdk_preset:
         description: "Select OpenWrt SDK target (ignored if Custom SDK tag is filled)"
@@ -47,12 +47,10 @@ jobs:
             bash -euo pipefail -c '
               cd /builder
               [ ! -d ./scripts ] && ./setup.sh
-              ./scripts/feeds update -a
-              ./scripts/feeds install -a
-              ./scripts/feeds uninstall opennds || true
+              ./scripts/feeds update packages routing
+              ./scripts/feeds install opennds
 
               cp -rf /src /tmp/opennds-src
-              cp -rf /tmp/opennds-src/openwrt/opennds /builder/package/
 
               make defconfig
               make package/opennds/compile USE_SOURCE_DIR=/tmp/opennds-src -j$(nproc) V=s
@@ -64,6 +62,5 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: opennds-${{ inputs.opennds_ref }}-${{ inputs.custom_sdk_tag != '' && inputs.custom_sdk_tag || inputs.sdk_preset }}
-          path: ${{ github.workspace }}/out/*
+          name: opennds-${{ inputs.opennds_ref }}-${{ inputs.custom_sdk_tag != ''
           
