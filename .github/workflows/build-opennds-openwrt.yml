@@ -56,7 +56,7 @@ jobs:
               ./scripts/feeds install libmicrohttpd
               ./scripts/feeds install -p localfeed -f opennds
               make defconfig
-              make package/opennds/compile USE_SOURCE_DIR=/tmp/opennds-src -j$(nproc) V=s
+              make package/opennds/compile -j$(nproc) V=s
               find /builder/bin -type f \( -name "opennds*.apk" -o -name "opennds*.ipk" \) -exec cp -v {} /out/ \;
               ls -lh /out
               find /out -type f \( -name "opennds*.apk" -o -name "opennds*.ipk" \) | grep -q .
