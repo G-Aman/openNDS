@@ -50,7 +50,8 @@ jobs:
               cp -a /src /tmp/opennds-src
               mkdir -p /tmp/localfeed/net/opennds
               cp /tmp/opennds-src/linux_openwrt/opennds/Makefile /tmp/localfeed/net/opennds/Makefile
-              sed -i "s|^PKG_HASH:=.*|PKG_HASH:=|" /tmp/localfeed/net/opennds/Makefile
+              # Fix PKG_HASH with correct SHA256 for v11.0.0 tarball
+              sed -i "s|^PKG_HASH:=.*|PKG_HASH:=33940f8ef52e958cdf37fd49ca20a8140b85a096d529cf4e0122592ac24ced00|" /tmp/localfeed/net/opennds/Makefile
               grep -q "^src-link localfeed " feeds.conf || echo "src-link localfeed /tmp/localfeed" >> feeds.conf
               ./scripts/feeds update -a
               ./scripts/feeds install libmicrohttpd
