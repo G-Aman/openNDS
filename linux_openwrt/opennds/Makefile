@@ -12,7 +12,7 @@ PKG_RELEASE:=1
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=https://codeload.github.com/opennds/opennds/tar.gz/v$(PKG_VERSION)?
-PKG_HASH:=#shasum -a 256 of tar.gz of source files goes here
+PKG_HASH:=33940f8ef52e958cdf37fd49ca20a8140b85a096d529cf4e0122592ac24ced00
 
 PKG_MAINTAINER:=Rob White <rob@blue-wave.net>
 PKG_LICENSE:=GPL-2.0-only
@@ -21,6 +21,7 @@ PKG_CPE_ID:=cpe:/a:opennds:captive_portal
 
 PKG_FIXUP:=autoreconf
 PKG_BUILD_PARALLEL:=1
+PKG_BUILD_DIR:=$(BUILD_DIR)/openNDS-$(PKG_VERSION)
 
 include $(INCLUDE_DIR)/package.mk
 
