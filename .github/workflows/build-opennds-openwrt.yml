@@ -4,21 +4,21 @@ on:
   workflow_dispatch:
     inputs:
       opennds_ref:
-        description: "Branch or tag in THIS repo to build (e.g. 11.0.00, master)"
+        description: "Branch or tag in THIS repo to build"
         required: true
         default: "11.0.00"
         type: string
       sdk_preset:
-        description: "Select OpenWrt SDK target (ignored if Custom SDK tag is filled)"
+        description: "OpenWrt SDK target"
         required: true
         type: choice
         default: "armsr-armv8-25.12.5"
         options:
-          - armsr-armv8-25.12.5        # aarch64_generic
-          - bcm27xx-bcm2711-25.12.5    # aarch64_cortex-a72
-          - mediatek-filogic-25.12.5   # aarch64_cortex-a53
+          - armsr-armv8-25.12.5
+          - bcm27xx-bcm2711-25.12.5
+          - mediatek-filogic-25.12.5
       custom_sdk_tag:
-        description: "Optional: Manual SDK tag override (e.g. armsr-armv8-24.10.0)"
+        description: "Optional SDK tag override"
         required: false
         default: ""
         type: string
@@ -26,42 +26,45 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout this repo
+      - name: Checkout openNDS source
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.opennds_ref }}
 
-      - name: Build openNDS in OpenWrt SDK container
+      - name: Build openNDS package
         env:
           SDK_TAG: ${{ inputs.custom_sdk_tag != '' && inputs.custom_sdk_tag || inputs.sdk_preset }}
         run: |
           mkdir -p "${{ github.workspace }}/out"
           chmod 777 "${{ github.workspace }}/out"
-
           docker run --rm \
             -v "${{ github.workspace }}:/src:ro" \
             -v "${{ github.workspace }}/out:/out" \
             "ghcr.io/openwrt/sdk:${SDK_TAG}" \
             bash -euo pipefail -c '
               cd /builder
-              [ ! -d ./scripts ] && ./setup.sh
-              ./scripts/feeds update packages routing
-              ./scripts/feeds install opennds
-
-              cp -rf /src /tmp/opennds-src
-
+              if [ ! -x ./scripts/feeds ]; then ./setup.sh; fi
+              if [ ! -f feeds.conf ]; then cp feeds.conf.default feeds.conf; fi
+              rm -rf /tmp/opennds-src /tmp/localfeed
+              cp -a /src /tmp/opennds-src
+              mkdir -p /tmp/localfeed/net/opennds
+              cp /tmp/opennds-src/linux_openwrt/opennds/Makefile /tmp/localfeed/net/opennds/Makefile
+              sed -i "s|^PKG_HASH:=.*|PKG_HASH:=|" /tmp/localfeed/net/opennds/Makefile
+              grep -q "^src-link localfeed " feeds.conf || echo "src-link localfeed /tmp/localfeed" >> feeds.conf
+              ./scripts/feeds update -a
+              ./scripts/feeds install libmicrohttpd
+              ./scripts/feeds install -p localfeed -f opennds
               make defconfig
               make package/opennds/compile USE_SOURCE_DIR=/tmp/opennds-src -j$(nproc) V=s
-
-              find /builder/bin/packages -type f \( -name "opennds*.ipk" -o -name "opennds*.apk" \) -exec cp -v {} /out/ \;
-              ls -lh /out/
+              find /builder/bin -type f \( -name "opennds*.apk" -o -name "opennds*.ipk" \) -exec cp -v {} /out/ \;
+              ls -lh /out
+              find /out -type f \( -name "opennds*.apk" -o -name "opennds*.ipk" \) | grep -q .
             '
 
-      - name: Upload artifact
+      - name: Upload package
         uses: actions/upload-artifact@v4
         with:
           name: opennds-${{ inputs.opennds_ref }}-${{ inputs.custom_sdk_tag != '' && inputs.custom_sdk_tag || inputs.sdk_preset }}
-          path: ${{ github.workspace }}/out/*
-          
+          path: out/*
+          if-no-files-found: error
