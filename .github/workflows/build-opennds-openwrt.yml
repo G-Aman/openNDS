@@ -53,14 +53,15 @@ jobs:
               # Fix PKG_HASH with correct SHA256 for v11.0.0 tarball
               sed -i "s|^PKG_HASH:=.*|PKG_HASH:=33940f8ef52e958cdf37fd49ca20a8140b85a096d529cf4e0122592ac24ced00|" /tmp/localfeed/net/opennds/Makefile
               # Add missing PKG_BUILD_DIR (11.0.00 branch lacks it; tarball extracts to openNDS-11.0.0 uppercase)
-              grep -q "^PKG_BUILD_DIR:" /tmp/localfeed/net/opennds/Makefile || \
-                sed -i "/^PKG_BUILD_PARALLEL:=/a PKG_BUILD_DIR:=\$\$(BUILD_DIR)/openNDS-\$\$(PKG_VERSION)" /tmp/localfeed/net/opennds/Makefile
+              if ! grep -q "^PKG_BUILD_DIR:" /tmp/localfeed/net/opennds/Makefile; then
+                sed -i "/^PKG_BUILD_PARALLEL:=.*/a PKG_BUILD_DIR:=\\$(BUILD_DIR)/openNDS-\\$(PKG_VERSION)" /tmp/localfeed/net/opennds/Makefile
+              fi
               grep -q "^src-link localfeed " feeds.conf || echo "src-link localfeed /tmp/localfeed" >> feeds.conf
               ./scripts/feeds update -a
               ./scripts/feeds install libmicrohttpd
               ./scripts/feeds install -p localfeed -f opennds
               make defconfig
-              make package/opennds/compile -j\$(nproc) V=s
+              make package/opennds/compile -j$(nproc) V=s
               find /builder/bin -type f \( -name "opennds*.apk" -o -name "opennds*.ipk" \) -exec cp -v {} /out/ \;
               ls -lh /out
               find /out -type f \( -name "opennds*.apk" -o -name "opennds*.ipk" \) | grep -q .
