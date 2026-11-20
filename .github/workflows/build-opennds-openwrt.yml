@@ -3,15 +3,10 @@ name: Build openNDS for OpenWrt
 on:
   workflow_dispatch:
     inputs:
-      repo_url:
-        description: "Git repository URL"
-        required: true
-        default: "https://github.com/openNDS/openNDS.git"
-        type: string
       opennds_ref:
-        description: "Branch or tag to build (e.g. v11.0.0, master)"
+        description: "Branch or tag in THIS repo to build (e.g. master, v11.0.0)"
         required: true
-        default: "v11.0.0"
+        default: "master"
         type: string
       sdk_preset:
         description: "Select OpenWrt SDK target (ignored if Custom SDK tag is filled)"
@@ -35,6 +30,11 @@ jobs:
       image: ghcr.io/openwrt/sdk:${{ inputs.custom_sdk_tag != '' && inputs.custom_sdk_tag || inputs.sdk_preset }}
 
     steps:
+      - name: Checkout this repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.opennds_ref }}
+
       - name: Initialize OpenWrt SDK
         run: |
           cd /builder
@@ -43,18 +43,15 @@ jobs:
           ./scripts/feeds install -a
           ./scripts/feeds uninstall opennds || true
 
-      - name: Fetch openNDS source and OpenWrt Makefile
+      - name: Copy OpenWrt package Makefile from this repo
         run: |
-          cd /builder
-          git clone --depth 1 --branch "${{ inputs.opennds_ref }}" "${{ inputs.repo_url }}" /tmp/opennds-src
-          cp -rf /tmp/opennds-src/openwrt/opennds package/
-          rm -rf /tmp/opennds-src
+          cp -rf "${{ github.workspace }}/openwrt/opennds" /builder/package/
 
-      - name: Compile openNDS
+      - name: Compile openNDS from local repo source
         run: |
           cd /builder
           make defconfig
-          make package/opennds/compile -j$(nproc) V=s
+          make package/opennds/compile USE_SOURCE_DIR="${{ github.workspace }}" -j$(nproc) V=s
 
       - name: Collect built package
         run: |
@@ -67,4 +64,3 @@ jobs:
         with:
           name: opennds-${{ inputs.opennds_ref }}-${{ inputs.custom_sdk_tag != '' && inputs.custom_sdk_tag || inputs.sdk_preset }}
           path: ${{ github.workspace }}/out/*
-          
