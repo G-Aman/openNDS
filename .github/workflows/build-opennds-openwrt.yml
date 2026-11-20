@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       opennds_ref:
-        description: "Branch or tag in THIS repo to build (e.g. master, v11.0.0)"
+        description: "Branch or tag in THIS repo to build (e.g. master, 11.0.00)"
         required: true
         default: "master"
         type: string
@@ -26,8 +26,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/openwrt/sdk:${{ inputs.custom_sdk_tag != '' && inputs.custom_sdk_tag || inputs.sdk_preset }}
 
     steps:
       - name: Checkout this repo
@@ -35,32 +33,37 @@ jobs:
         with:
           ref: ${{ inputs.opennds_ref }}
 
-      - name: Initialize OpenWrt SDK
-        run: |
-          cd /builder
-          [ ! -d ./scripts ] && ./setup.sh
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
-          ./scripts/feeds uninstall opennds || true
-
-      - name: Copy OpenWrt package Makefile from this repo
-        run: |
-          cp -rf "${{ github.workspace }}/openwrt/opennds" /builder/package/
-
-      - name: Compile openNDS from local repo source
-        run: |
-          cd /builder
-          make defconfig
-          make package/opennds/compile USE_SOURCE_DIR="${{ github.workspace }}" -j$(nproc) V=s
-
-      - name: Collect built package
+      - name: Build openNDS in OpenWrt SDK container
+        env:
+          SDK_TAG: ${{ inputs.custom_sdk_tag != '' && inputs.custom_sdk_tag || inputs.sdk_preset }}
         run: |
           mkdir -p "${{ github.workspace }}/out"
-          find /builder/bin/packages -type f \( -name "opennds*.ipk" -o -name "opennds*.apk" \) -exec cp -v {} "${{ github.workspace }}/out/" \;
-          ls -lh "${{ github.workspace }}/out/"
+          chmod 777 "${{ github.workspace }}/out"
+
+          docker run --rm \
+            -v "${{ github.workspace }}:/src:ro" \
+            -v "${{ github.workspace }}/out:/out" \
+            "ghcr.io/openwrt/sdk:${SDK_TAG}" \
+            bash -euo pipefail -c '
+              cd /builder
+              [ ! -d ./scripts ] && ./setup.sh
+              ./scripts/feeds update -a
+              ./scripts/feeds install -a
+              ./scripts/feeds uninstall opennds || true
+
+              cp -rf /src /tmp/opennds-src
+              cp -rf /tmp/opennds-src/openwrt/opennds /builder/package/
+
+              make defconfig
+              make package/opennds/compile USE_SOURCE_DIR=/tmp/opennds-src -j$(nproc) V=s
+
+              find /builder/bin/packages -type f \( -name "opennds*.ipk" -o -name "opennds*.apk" \) -exec cp -v {} /out/ \;
+              ls -lh /out/
+            '
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: opennds-${{ inputs.opennds_ref }}-${{ inputs.custom_sdk_tag != '' && inputs.custom_sdk_tag || inputs.sdk_preset }}
           path: ${{ github.workspace }}/out/*
+          
