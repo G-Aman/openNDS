@@ -1,0 +1,70 @@
+name: Build openNDS for OpenWrt
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo_url:
+        description: "Git repository URL"
+        required: true
+        default: "https://github.com/openNDS/openNDS.git"
+        type: string
+      opennds_ref:
+        description: "Branch or tag to build (e.g. v11.0.0, master)"
+        required: true
+        default: "v11.0.0"
+        type: string
+      sdk_preset:
+        description: "Select OpenWrt SDK target (ignored if Custom SDK tag is filled)"
+        required: true
+        type: choice
+        default: "armsr-armv8-25.12.5"
+        options:
+          - armsr-armv8-25.12.5        # aarch64_generic
+          - bcm27xx-bcm2711-25.12.5    # aarch64_cortex-a72
+          - mediatek-filogic-25.12.5   # aarch64_cortex-a53
+      custom_sdk_tag:
+        description: "Optional: Manual SDK tag override (e.g. armsr-armv8-24.10.0)"
+        required: false
+        default: ""
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/openwrt/sdk:${{ inputs.custom_sdk_tag != '' && inputs.custom_sdk_tag || inputs.sdk_preset }}
+
+    steps:
+      - name: Initialize OpenWrt SDK
+        run: |
+          cd /builder
+          [ ! -d ./scripts ] && ./setup.sh
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+          ./scripts/feeds uninstall opennds || true
+
+      - name: Fetch openNDS source and OpenWrt Makefile
+        run: |
+          cd /builder
+          git clone --depth 1 --branch "${{ inputs.opennds_ref }}" "${{ inputs.repo_url }}" /tmp/opennds-src
+          cp -rf /tmp/opennds-src/openwrt/opennds package/
+          rm -rf /tmp/opennds-src
+
+      - name: Compile openNDS
+        run: |
+          cd /builder
+          make defconfig
+          make package/opennds/compile -j$(nproc) V=s
+
+      - name: Collect built package
+        run: |
+          mkdir -p "${{ github.workspace }}/out"
+          find /builder/bin/packages -type f \( -name "opennds*.ipk" -o -name "opennds*.apk" \) -exec cp -v {} "${{ github.workspace }}/out/" \;
+          ls -lh "${{ github.workspace }}/out/"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: opennds-${{ inputs.opennds_ref }}-${{ inputs.custom_sdk_tag != '' && inputs.custom_sdk_tag || inputs.sdk_preset }}
+          path: ${{ github.workspace }}/out/*
+          
